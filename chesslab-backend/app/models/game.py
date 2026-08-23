@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, DateTime, Integer, Text, ForeignKey, Boolean
+from sqlalchemy import Column, String, DateTime, Integer, Text, ForeignKey, Boolean, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -13,13 +13,18 @@ def gen_uuid() -> str:
 
 class Game(Base):
     __tablename__ = "games"
+    # o mesmo jogo pode pertencer a contas diferentes (ex.: dois users
+    # seguem o mesmo jogador) — a unicidade é por dono, não global
+    __table_args__ = (
+        UniqueConstraint("owner_id", "chesscom_game_id", name="uq_games_owner_game"),
+    )
 
     id = Column(String, primary_key=True, default=gen_uuid)
     owner_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
 
     # ID único da partida no Chess.com — chave pra evitar reimportar a mesma
     # partida em cada sync (é isto que responde à pergunta "já existe?")
-    chesscom_game_id = Column(String, unique=True, index=True, nullable=False)
+    chesscom_game_id = Column(String, index=True, nullable=False)
 
     pgn = Column(Text, nullable=False)
 

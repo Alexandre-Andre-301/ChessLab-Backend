@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, DateTime
+from sqlalchemy import Boolean, Column, String, DateTime, Integer
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -19,8 +19,13 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
 
-    # username público do Chess.com, preenchido no onboarding (fase 2)
+    # username público do Chess.com, preenchido no onboarding
     chesscom_username = Column(String, nullable=True)
+
+    # respostas do onboarding
+    main_goal = Column(String, nullable=True)
+    peak_rating = Column(Integer, nullable=True)
+    onboarding_completed = Column(Boolean, nullable=False, default=False)
 
     created_at = Column(DateTime, default=datetime.utcnow)
 
