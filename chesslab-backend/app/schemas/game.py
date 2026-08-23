@@ -33,3 +33,9 @@ class SyncResponse(BaseModel):
     games_found: int
     games_imported: int
     message: str
+
+
+class RatingPoint(BaseModel):
+    """Ponto da curva de evolução do rating do jogador."""
+    played_at: datetime
+    player_rating: int

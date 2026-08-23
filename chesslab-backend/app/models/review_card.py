@@ -13,10 +13,13 @@ def gen_uuid() -> str:
 
 class ReviewCard(Base):
     """
-    Cada card representa uma posição (linha de abertura, por agora) que o
-    jogador errou e precisa de reforçar. Campos seguem a lógica do SM-2
-    (mesmo algoritmo do Anki): repetitions, ease_factor e interval_days
-    juntos decidem quando o card volta a aparecer.
+    Cada card representa uma posição para treinar com repetição espaçada
+    (SM-2, como o Anki):
+
+    - card_type="opening": posição do repertório do jogador (dos seus jogos),
+      ele tem de acertar o lance que costuma jogar.
+    - card_type="puzzle": posição tática dos seus jogos (mate em 1 ou
+      captura que ganha material), ele tem de encontrar o melhor lance.
     """
     __tablename__ = "review_cards"
 
@@ -24,8 +27,11 @@ class ReviewCard(Base):
     owner_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     source_game_id = Column(String, ForeignKey("games.id"), nullable=True)
 
-    fen = Column(String, nullable=False)          # posição antes do erro
-    correct_move = Column(String, nullable=False)  # lance correto em SAN ou UCI
+    card_type = Column(String, nullable=False, default="opening")  # opening | puzzle
+
+    fen = Column(String, nullable=False)           # posição antes do lance (4 campos)
+    correct_move = Column(String, nullable=False)   # lance correto em SAN
+    correct_move_uci = Column(String, nullable=True)  # mesmo lance em UCI (e2e4)
     opening_eco = Column(String, nullable=True)
 
     # estado do algoritmo de repetição espaçada
