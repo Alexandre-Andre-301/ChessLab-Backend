@@ -17,6 +17,10 @@ class GameResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class GameDetailResponse(GameResponse):
+    pgn: str
+
+
 class OpeningStat(BaseModel):
     """Resposta da rota que responde 'onde falho nas aberturas'."""
     opening_eco: str
@@ -39,3 +43,19 @@ class RatingPoint(BaseModel):
     """Ponto da curva de evolução do rating do jogador."""
     played_at: datetime
     player_rating: int
+
+
+class TimeClassStat(BaseModel):
+    """Win rate agregado por ritmo (bullet/blitz/rapid/daily)."""
+    time_class: str
+    games: int
+    wins: int
+    losses: int
+    draws: int
+    win_rate: float
+
+
+class InsightItem(BaseModel):
+    kind: str   # weakness | strength | trend | pattern
+    title: str
+    message: str

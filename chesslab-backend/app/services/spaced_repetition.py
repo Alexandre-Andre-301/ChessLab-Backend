@@ -2,9 +2,9 @@ from datetime import datetime, timedelta, timezone
 
 from app.models.review_card import ReviewCard
 
-# intervalos do SM-2 simplificado (como o Anki)
+# intervalos do SM-2 clássico (como o Anki): 1d -> 6d -> intervalo × EF
 FIRST_INTERVAL = 1
-SECOND_INTERVAL = 3
+SECOND_INTERVAL = 6
 
 
 def _utcnow() -> datetime:

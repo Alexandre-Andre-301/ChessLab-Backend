@@ -3,6 +3,7 @@ from collections import Counter
 
 import chess
 import chess.pgn
+from sqlalchemy import text
 
 from app.models.game import Game
 from app.models.review_card import ReviewCard
@@ -21,8 +22,6 @@ PIECE_VALUES = {
     chess.QUEEN: 900,
     chess.KING: 0,
 }
-
-GAMBIT_RESULTS = {"accepted", "declined", "refused"}
 
 
 def fen_key(board: chess.Board) -> str:
@@ -62,20 +61,36 @@ def see_capture(board: chess.Board, move: chess.Move) -> int:
     return score
 
 
-def find_puzzles_in_game(pgn_text: str, player_color: chess.Color) -> list[tuple[str, str, str]]:
+def _piece_name(piece_type: int) -> str:
+    names = {
+        chess.PAWN: "peão",
+        chess.KNIGHT: "cavalo",
+        chess.BISHOP: "bispo",
+        chess.ROOK: "torre",
+        chess.QUEEN: "dama",
+    }
+    return names.get(piece_type, "peça")
+
+
+def find_puzzles_in_game(
+    pgn_text: str, player_color: chess.Color
+) -> list[tuple[str, str, str, list[str], str]]:
     """
-    Percorre o PGN e devolve puzzles [(fen_key, san, uci)] nas posições em
-    que era a vez do jogador e existia mate em 1 ou captura vencedora.
+    Percorre o PGN e devolve puzzles:
+    [(fen_key, san, uci, linha_san_ate_posicao, explicacao)]
+    nas posições em que era a vez do jogador e existia mate em 1 ou
+    captura vencedora.
     """
     game = chess.pgn.read_game(io.StringIO(pgn_text))
     if game is None:
         return []
 
-    found: list[tuple[str, str, str]] = []
+    found: list[tuple[str, str, str, list[str], str]] = []
     seen_in_game: set[str] = set()
 
     node = game
     board = game.board()
+    line: list[str] = []
 
     while node.variations and len(found) < 2:
         move = node.variations[0].move
@@ -84,10 +99,10 @@ def find_puzzles_in_game(pgn_text: str, player_color: chess.Color) -> list[tuple
 
         if board.turn == player_color and not board.is_game_over():
             best_san, best_uci, best_gain = "", "", MIN_SEE_GAIN_CP - 1
+            best_captured: int | None = None
 
             for candidate in board.legal_moves:
-                is_mate = _is_mate_in_one(board, candidate)
-                if is_mate:
+                if _is_mate_in_one(board, candidate):
                     best_san, best_uci, best_gain = (
                         board.san(candidate),
                         candidate.uci(),
@@ -100,17 +115,42 @@ def find_puzzles_in_game(pgn_text: str, player_color: chess.Color) -> list[tuple
                     best_gain = gain
                     best_san = board.san(candidate)
                     best_uci = candidate.uci()
+                    best_captured = board.piece_type_at(candidate.to_square)
 
             if best_uci:
                 key = fen_key(board)
                 if key not in seen_in_game:
                     seen_in_game.add(key)
-                    found.append((key, best_san, best_uci))
 
+                    if best_gain >= 10_000:
+                        explanation = "Há mate em 1 nesta posição. Encontra o lance."
+                    elif best_captured is not None:
+                        explanation = (
+                            f"Podes capturar {_article(best_captured)} e ganhar ~"
+                            f"{best_gain / 100:.1f} peças de material na troca."
+                        )
+                    else:
+                        explanation = "Existe um lance que ganha material."
+
+                    found.append((key, best_san, best_uci, list(line), explanation))
+
+        san = board.san(move)
         board.push(move)
+        line.append(san)
         node = node.variations[0]
 
     return found
+
+
+def _article(piece_type: int) -> str:
+    names = {
+        chess.PAWN: "um peão",
+        chess.KNIGHT: "um cavalo",
+        chess.BISHOP: "um bispo",
+        chess.ROOK: "uma torre",
+        chess.QUEEN: "a dama",
+    }
+    return names.get(piece_type, "material")
 
 
 def _is_mate_in_one(board: chess.Board, move: chess.Move) -> bool:
@@ -125,6 +165,8 @@ def generate_cards(db, user) -> dict:
     Cria cartões SR a partir dos jogos já importados do utilizador:
     - aberturas: lances do próprio jogador nos primeiros plies (voto por maioria)
     - puzzles: mate em 1 / capturas vencedoras nas posições dele
+    Cada cartão guarda contexto estilo Lotus: frequência, linha até à posição
+    e explicação do porquê do lance.
     """
     existing_keys = {
         (fen, card_type)
@@ -142,8 +184,10 @@ def generate_cards(db, user) -> dict:
     )
 
     username = (user.chesscom_username or "").lower()
-    opening_votes: Counter = Counter()          # (fen, eco) -> Counter[(san, uci)]
-    puzzle_candidates: list[tuple[str, str, str, str | None]] = []
+
+    # (fen, eco) -> {"moves": Counter[(san, uci)], "line": [...], "count": n}
+    opening_positions: dict[tuple[str, str | None], dict] = {}
+    puzzle_candidates: list[tuple[str, str, str, list[str], str, str | None]] = []
 
     for game in games:
         try:
@@ -158,6 +202,7 @@ def generate_cards(db, user) -> dict:
             # ---- cartões de abertura ----
             node = parsed
             board = parsed.board()
+            line: list[str] = []
             ply = 0
             while node.variations and ply < MAX_OPENING_PLY:
                 move = node.variations[0].move
@@ -165,49 +210,83 @@ def generate_cards(db, user) -> dict:
                     break
 
                 if board.turn == color:
-                    bucket = opening_votes.setdefault(
-                        (fen_key(board), game.opening_eco), Counter()
+                    entry = opening_positions.setdefault(
+                        (fen_key(board), game.opening_eco),
+                        {"moves": Counter(), "line": [], "count": 0},
                     )
-                    bucket[(board.san(move), move.uci())] += 1
+                    entry["moves"][(board.san(move), move.uci())] += 1
+                    entry["count"] += 1
+                    # guarda a linha mais curta que chega a esta posição
+                    if not entry["line"] or len(line) < len(entry["line"]):
+                        entry["line"] = list(line)
 
+                san = board.san(move)
                 board.push(move)
+                line.append(san)
                 node = node.variations[0]
                 ply += 1
 
             # ---- puzzles ----
             if len(puzzle_candidates) < MAX_PUZZLE_CARDS:
-                for fen, san, uci in find_puzzles_in_game(game.pgn, color):
-                    puzzle_candidates.append((fen, san, uci, game.opening_eco))
+                for fen, san, uci, puzzle_line, explanation in find_puzzles_in_game(
+                    game.pgn, color
+                ):
+                    puzzle_candidates.append(
+                        (fen, san, uci, puzzle_line, explanation, game.opening_eco)
+                    )
                     if len(puzzle_candidates) >= MAX_PUZZLE_CARDS:
                         break
         except Exception:
             # um PGN problemático não pode rebentar a geração toda
             continue
 
-    openings_created = _create_opening_cards(db, user.id, opening_votes, existing_keys)
+    openings_created = _create_opening_cards(
+        db, user.id, opening_positions, existing_keys
+    )
     puzzles_created = _create_puzzle_cards(db, user.id, puzzle_candidates, existing_keys)
     db.commit()
 
     return {"opening_cards": openings_created, "puzzle_cards": puzzles_created}
 
 
-def _create_opening_cards(db, user_id, votes: Counter, existing_keys) -> int:
+def _family_for_eco(db, eco: str | None) -> str | None:
+    """Procura a família na base ECO do Lichess; fallback: prefixo do código."""
+    if not eco:
+        return None
+    row = db.execute(
+        text("SELECT family FROM opening_book WHERE eco = :eco LIMIT 1"),
+        {"eco": eco},
+    ).first()
+    return row[0] if row else None
+
+
+def _create_opening_cards(db, user_id, positions: dict, existing_keys) -> int:
     created = 0
 
-    # voto por maioria: o lance mais jogado pelo próprio é "o repertório"
-    best_by_fen: dict[str, tuple[str, str, str | None]] = {}
-    for (fen, eco), choices in votes.items():
-        (san, uci), count = choices.most_common(1)[0]
-        current = best_by_fen.get(fen)
-        if current is None or count > 0:
-            if current is None or choices[(current[0], current[1])] < count:
-                best_by_fen[fen] = (san, uci, eco)
+    # agrega por fen: soma ocorrências e guarda o lance mais votado
+    by_fen: dict[str, dict] = {}
+    for (fen, eco), entry in positions.items():
+        target = by_fen.setdefault(
+            fen, {"occurrences": 0, "best": None, "best_count": -1, "eco": eco}
+        )
+        target["occurrences"] += entry["count"]
+        (san, uci), count = entry["moves"].most_common(1)[0]
+        if count > target["best_count"]:
+            target["best_count"] = count
+            target["best"] = (san, uci, entry["line"])
 
-    for fen, (san, uci, eco) in best_by_fen.items():
+    for fen, data in sorted(
+        by_fen.items(), key=lambda kv: kv[1]["occurrences"], reverse=True
+    ):
         if created >= MAX_OPENING_CARDS:
             break
         if (fen, "opening") in existing_keys:
             continue
+
+        san, uci, line = data["best"]
+        eco = data["eco"]
+        color = "white" if fen.split()[1] == "w" else "black"
+
         db.add(
             ReviewCard(
                 owner_id=user_id,
@@ -216,6 +295,10 @@ def _create_opening_cards(db, user_id, votes: Counter, existing_keys) -> int:
                 correct_move=san,
                 correct_move_uci=uci,
                 opening_eco=eco,
+                family=_family_for_eco(db, eco),
+                color=color,
+                occurrences=data["occurrences"],
+                line_moves=" ".join(line),
             )
         )
         existing_keys.add((fen, "opening"))
@@ -228,7 +311,7 @@ def _create_puzzle_cards(db, user_id, candidates, existing_keys) -> int:
     created = 0
     seen: set[str] = set()
 
-    for fen, san, uci, eco in candidates:
+    for fen, san, uci, line, explanation, eco in candidates:
         if created >= MAX_PUZZLE_CARDS:
             break
         if fen in seen or (fen, "puzzle") in existing_keys:
@@ -242,6 +325,11 @@ def _create_puzzle_cards(db, user_id, candidates, existing_keys) -> int:
                 correct_move=san,
                 correct_move_uci=uci,
                 opening_eco=eco,
+                family=_family_for_eco(db, eco),
+                color="white" if fen.split()[1] == "w" else "black",
+                occurrences=1,
+                line_moves=" ".join(line),
+                explanation=explanation,
             )
         )
         existing_keys.add((fen, "puzzle"))

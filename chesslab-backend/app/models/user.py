@@ -1,7 +1,7 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import Boolean, Column, String, DateTime, Integer
+from sqlalchemy import Boolean, Column, String, DateTime, Integer, Date
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -26,6 +26,10 @@ class User(Base):
     main_goal = Column(String, nullable=True)
     peak_rating = Column(Integer, nullable=True)
     onboarding_completed = Column(Boolean, nullable=False, default=False)
+
+    # gamificação estilo Duolingo
+    streak_days = Column(Integer, nullable=False, default=0)
+    last_trained_date = Column(Date, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
 

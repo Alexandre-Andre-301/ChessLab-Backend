@@ -1,7 +1,7 @@
-import uuid
+﻿import uuid
 from datetime import datetime
 
-from sqlalchemy import Column, String, DateTime, Integer, Float, ForeignKey
+from sqlalchemy import Column, String, DateTime, Integer, Float, Text, ForeignKey
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -33,11 +33,23 @@ class ReviewCard(Base):
     correct_move = Column(String, nullable=False)   # lance correto em SAN
     correct_move_uci = Column(String, nullable=True)  # mesmo lance em UCI (e2e4)
     opening_eco = Column(String, nullable=True)
+    family = Column(String, nullable=True)  # família calculada (ex.: Caro-Kann Defense)
+    color = Column(String, nullable=True)   # cor do jogador nesta posição (white|black)
+
+    # contexto estilo Lotus: frequência da posição e linha até ela
+    occurrences = Column(Integer, nullable=False, default=1)
+    line_moves = Column(Text, nullable=True)  # lances SAN desde o início, separados por espaço
+    explanation = Column(Text, nullable=True)  # porquê do lance (estilo Lotus)
 
     # estado do algoritmo de repetição espaçada
     repetitions = Column(Integer, default=0)
     ease_factor = Column(Float, default=2.5)
     interval_days = Column(Integer, default=0)
+
+    # domínio pedagógico (0-100) e sequência de acertos
+    mastery = Column(Integer, nullable=False, default=0)
+    streak = Column(Integer, nullable=False, default=0)
+    lapses = Column(Integer, nullable=False, default=0)  # erros acumulados → relearning
 
     next_review_at = Column(DateTime, default=datetime.utcnow, index=True)
     last_reviewed_at = Column(DateTime, nullable=True)

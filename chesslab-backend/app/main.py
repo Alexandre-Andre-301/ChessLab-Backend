@@ -2,8 +2,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
 
-from app.database import Base, engine
-from app.routers import auth, users, games, sync, training
+from app.database import Base, SessionLocal, engine
+from app.routers import auth, users, games, sync, training, insights, openings
+from app.services import opening_book_service
 
 # cria as tabelas no SQLite se ainda não existirem.
 # Nota: isto serve pro MVP. Quando o schema começar a mudar com frequência,
@@ -31,6 +32,10 @@ def run_dev_migrations() -> None:
             conn.execute(
                 text("ALTER TABLE users ADD COLUMN onboarding_completed BOOLEAN DEFAULT 0")
             )
+        if "streak_days" not in existing:
+            conn.execute(text("ALTER TABLE users ADD COLUMN streak_days INTEGER DEFAULT 0"))
+        if "last_trained_date" not in existing:
+            conn.execute(text("ALTER TABLE users ADD COLUMN last_trained_date DATE"))
 
     if "games" in inspector.get_table_names():
         with engine.begin() as conn:
@@ -58,6 +63,24 @@ def run_dev_migrations() -> None:
                 conn.execute(
                     text("ALTER TABLE review_cards ADD COLUMN correct_move_uci VARCHAR")
                 )
+            if "occurrences" not in existing_rc:
+                conn.execute(
+                    text("ALTER TABLE review_cards ADD COLUMN occurrences INTEGER DEFAULT 1")
+                )
+            if "line_moves" not in existing_rc:
+                conn.execute(text("ALTER TABLE review_cards ADD COLUMN line_moves TEXT"))
+            if "explanation" not in existing_rc:
+                conn.execute(text("ALTER TABLE review_cards ADD COLUMN explanation TEXT"))
+            if "family" not in existing_rc:
+                conn.execute(text("ALTER TABLE review_cards ADD COLUMN family VARCHAR"))
+            if "color" not in existing_rc:
+                conn.execute(text("ALTER TABLE review_cards ADD COLUMN color VARCHAR"))
+            if "mastery" not in existing_rc:
+                conn.execute(text("ALTER TABLE review_cards ADD COLUMN mastery INTEGER DEFAULT 0"))
+            if "streak" not in existing_rc:
+                conn.execute(text("ALTER TABLE review_cards ADD COLUMN streak INTEGER DEFAULT 0"))
+            if "lapses" not in existing_rc:
+                conn.execute(text("ALTER TABLE review_cards ADD COLUMN lapses INTEGER DEFAULT 0"))
 
 
 run_dev_migrations()
@@ -77,6 +100,23 @@ app.include_router(users.router)
 app.include_router(games.router)
 app.include_router(sync.router)
 app.include_router(training.router)
+app.include_router(insights.router)
+app.include_router(openings.router)
+
+
+# sincroniza a base de aberturas do Lichess na primeira arranque
+def bootstrap_opening_book() -> None:
+    db = SessionLocal()
+    try:
+        opening_book_service.ensure_synced(db)
+    finally:
+        db.close()
+
+
+try:
+    bootstrap_opening_book()
+except Exception:
+    pass
 
 
 @app.get("/")
