@@ -91,7 +91,11 @@ import os
 from fastapi.middleware.cors import CORSMiddleware
 
 # Origins permitidas: localhost p/ dev + Vercel preview/production
-frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+frontend_url = os.getenv(
+    "FRONTEND_URL",
+    "https://chesslab-frontend01-one.vercel.app"
+)
+
 
 app.add_middleware(
     CORSMiddleware,
