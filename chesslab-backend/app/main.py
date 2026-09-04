@@ -90,16 +90,12 @@ app = FastAPI(title="ChessLab API", version="0.1.0")
 import os
 from fastapi.middleware.cors import CORSMiddleware
 
-# Origins permitidas: localhost p/ dev + Vercel preview/production
-frontend_url = os.getenv(
-    "FRONTEND_URL",
-    "https://chesslab-frontend01-one.vercel.app"
-)
+
 
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[frontend_url, "http://localhost:5173"],
+    allow_origins=[ "https://chesslab-frontend01-one.vercel.app/"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
